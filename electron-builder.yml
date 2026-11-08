@@ -1,0 +1,35 @@
+appId: app.cutroom.desktop
+productName: Cutroom
+copyright: Copyright © 2026 Om Gate
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md,components.json}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!docs/*'
+  # Cutroom drives the user's installed claude / codex, so the adapters' bundled platform binaries stay out.
+  - '!node_modules/@anthropic-ai/claude-agent-sdk-*/**'
+  - '!node_modules/@openai/codex-*/**'
+# Agent adapters ship native binaries they spawn by path; those can't execute from inside an asar archive.
+asar: false
+mac:
+  category: public.app-category.video
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  # Ad-hoc signature: required for Apple Silicon to launch the app; not notarized.
+  identity: '-'
+  hardenedRuntime: false
+  notarize: false
+  extendInfo:
+    NSDocumentsFolderUsageDescription: Cutroom opens project folders and media you choose.
+    NSDownloadsFolderUsageDescription: Cutroom opens project folders and media you choose.
+dmg:
+  artifactName: Cutroom-${version}-${arch}.${ext}
+  title: Cutroom ${version}
+npmRebuild: false
+publish: null
