@@ -7,6 +7,25 @@ export interface Settings {
   agent: AgentKind
   recent: string[]
   onboarded: boolean
+  // Last model / thinking level / toggles chosen per agent, re-applied to each new session.
+  agentConfig?: Partial<Record<AgentKind, Record<string, string | boolean>>>
+}
+
+export interface ConfigChoice {
+  value: string
+  name: string
+  description?: string | null
+}
+
+// ACP session config option, with grouped select options flattened.
+export interface ConfigOption {
+  id: string
+  name: string
+  description?: string | null
+  category?: string | null
+  type: 'select' | 'boolean'
+  currentValue: string | boolean
+  options: ConfigChoice[]
 }
 
 export interface AgentInfo {
@@ -82,6 +101,7 @@ export type AgentStatus =
       modes: AgentMode[]
       currentMode?: string
       images: boolean
+      config: ConfigOption[]
     }
   | { state: 'error'; kind: AgentKind; error: string }
 

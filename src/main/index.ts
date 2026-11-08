@@ -202,6 +202,7 @@ function registerIpc(): void {
   )
   ipcMain.handle('agent:cancel', () => agent.cancel())
   ipcMain.handle('agent:set-mode', (_e, id: string) => agent.setMode(id))
+  ipcMain.handle('agent:set-config', (_e, id: string, value: string | boolean) => agent.setConfig(id, value))
   ipcMain.handle('agent:permission-reply', (_e, requestId: string, optionId: string | null) =>
     agent.answerPermission(requestId, optionId)
   )

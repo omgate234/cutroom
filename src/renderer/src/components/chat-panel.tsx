@@ -24,7 +24,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue
 } from '@/components/ui/select'
 import {
   InputGroup,
@@ -35,6 +34,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { AgentKind, AgentStatus, Attachment, PermissionAsk, ProjectState } from '@shared/ipc'
 import { AGENT_LABEL, AgentIcon } from '@/components/brand'
+import { AgentControls } from '@/components/chat/agent-controls'
 import {
   ErrorStep,
   PermissionStep,
@@ -542,9 +542,10 @@ export function ChatPanel({
             <Select value={kind} onValueChange={(v) => start(v as AgentKind)}>
               <SelectTrigger
                 size="sm"
-                className="h-6 gap-1.5 border-0 px-1.5 text-xs shadow-none dark:bg-transparent"
+                className="h-6 gap-1 border-0 px-1.5 text-xs shadow-none dark:bg-transparent"
+                aria-label="Agent"
               >
-                <SelectValue />
+                <AgentIcon kind={kind} className="size-3.5" />
               </SelectTrigger>
               <SelectContent>
                 {(['claude', 'codex', 'pi'] as AgentKind[]).map((k) => (
@@ -555,26 +556,7 @@ export function ChatPanel({
                 ))}
               </SelectContent>
             </Select>
-            {status.state === 'ready' && status.modes.length > 0 && (
-              <Select
-                value={status.currentMode}
-                onValueChange={(v) => void window.api.agent.setMode(v)}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="h-6 border-0 px-1.5 text-xs shadow-none dark:bg-transparent"
-                >
-                  <SelectValue placeholder="Mode" />
-                </SelectTrigger>
-                <SelectContent>
-                  {status.modes.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
+            <AgentControls status={status} />
             <div className="flex-1" />
             <AnimatePresence mode="wait" initial={false}>
               <motion.span

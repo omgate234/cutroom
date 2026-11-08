@@ -47,6 +47,7 @@ const api = {
     prompt: invoke('agent:prompt'),
     cancel: invoke('agent:cancel'),
     setMode: invoke('agent:set-mode'),
+    setConfig: invoke('agent:set-config'),
     reply: invoke('agent:permission-reply')
   },
   openExternal: invoke('shell:open'),

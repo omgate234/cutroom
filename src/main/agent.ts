@@ -1,3 +1,4 @@
+import { app as electronApp } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
 import { Readable, Writable } from 'stream'
 import { join } from 'path'
@@ -12,7 +13,8 @@ import {
   type RequestPermissionResponse
 } from '@agentclientprotocol/sdk'
 import { promises as fs } from 'fs'
-import type { AgentKind, AgentStatus, Attachment, PermissionAsk } from '@shared/ipc'
+import type { AgentKind, AgentStatus, Attachment, ConfigOption, PermissionAsk } from '@shared/ipc'
+import { getSettings, setSettings } from './settings'
 import { which } from './env'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 
@@ -57,7 +59,11 @@ export class AgentSession {
     const stale = (): boolean => gen !== this.generation
     this.setStatus({ state: 'starting', kind })
     // The agent may use VideoDB directly (skills / SDK scripts), so it gets the user's key too.
-    const env: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1', VIDEO_DB_API_KEY: apiKey }
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      VIDEO_DB_API_KEY: apiKey
+    }
     // Drive the user's own installed CLIs (same login, same version they use) instead of bundled copies.
     if (kind === 'claude') env.CLAUDE_CODE_EXECUTABLE ??= await which('claude')
     if (kind === 'codex') env.CODEX_PATH ??= await which('codex')
@@ -87,7 +93,11 @@ export class AgentSession {
         this.askPermission(params)
       )
       .onNotification(methods.client.session.update, ({ params }) => {
-        if (params.sessionId === this.sessionId) this.send('agent:update', params.update)
+        if (params.sessionId !== this.sessionId) return
+        const u = params.update as { sessionUpdate: string; configOptions?: unknown[] }
+        if (u.sessionUpdate === 'config_option_update' && this.status.state === 'ready')
+          this.setStatus({ ...this.status, config: normalizeConfig(u.configOptions) })
+        this.send('agent:update', params.update)
       })
 
     const stream = ndJsonStream(
@@ -100,7 +110,7 @@ export class AgentSession {
       const init = await conn.agent.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION,
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-        clientInfo: { name: 'cutroom', version: '0.1.0' }
+        clientInfo: { name: 'cutroom', version: electronApp.getVersion() }
       })
       const session = await conn.agent.request(methods.agent.session.new, {
         cwd: dir,
@@ -125,8 +135,10 @@ export class AgentSession {
         name: init.agentInfo?.title ?? init.agentInfo?.name ?? ADAPTERS[kind].label,
         modes: session.modes?.availableModes ?? [],
         currentMode: session.modes?.currentModeId,
-        images: !!init.agentCapabilities?.promptCapabilities?.image
+        images: !!init.agentCapabilities?.promptCapabilities?.image,
+        config: normalizeConfig(session.configOptions)
       })
+      await this.applySaved(kind)
     } catch (e) {
       if (stale()) return
       const err = e as { message?: string; code?: number }
@@ -188,6 +200,44 @@ export class AgentSession {
     this.pending.clear()
   }
 
+  // Re-apply the user's last model / thinking level / toggles for this agent, where still valid.
+  private async applySaved(kind: AgentKind): Promise<void> {
+    const saved = (await getSettings()).agentConfig?.[kind] ?? {}
+    for (const [id, value] of Object.entries(saved)) {
+      if (this.status.state !== 'ready') return
+      const opt = this.status.config.find((o) => o.id === id)
+      if (!opt || opt.currentValue === value) continue
+      if (opt.type === 'select' && !opt.options.some((c) => c.value === value)) continue
+      await this.setConfig(id, value, false).catch(() => undefined)
+    }
+  }
+
+  async setConfig(configId: string, value: string | boolean, remember = true): Promise<void> {
+    if (!this.conn || !this.sessionId || this.status.state !== 'ready') return
+    const kind = this.status.kind
+    const res = await this.conn.agent.request(
+      methods.agent.session.setConfigOption,
+      (typeof value === 'boolean'
+        ? { sessionId: this.sessionId, configId, type: 'boolean', value }
+        : { sessionId: this.sessionId, configId, value }) as never
+    )
+    if (this.status.state === 'ready') {
+      const config = normalizeConfig((res as { configOptions?: unknown[] }).configOptions)
+      const mode = config.find((o) => o.category === 'mode')
+      this.setStatus({
+        ...this.status,
+        config: config.length ? config : this.status.config,
+        currentMode:
+          typeof mode?.currentValue === 'string' ? mode.currentValue : this.status.currentMode
+      })
+    }
+    if (!remember) return
+    const s = await getSettings()
+    await setSettings({
+      agentConfig: { ...s.agentConfig, [kind]: { ...s.agentConfig?.[kind], [configId]: value } }
+    })
+  }
+
   async setMode(modeId: string): Promise<void> {
     if (!this.conn || !this.sessionId || this.status.state !== 'ready') return
     await this.conn.agent.request(methods.agent.session.setMode, {
@@ -227,4 +277,33 @@ export class AgentSession {
     child?.kill()
     if (report) this.setStatus({ state: 'off' })
   }
+}
+
+type RawChoice = {
+  value?: string
+  name?: string
+  description?: string | null
+  options?: RawChoice[]
+}
+
+function normalizeConfig(raw: unknown): ConfigOption[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map((o) => {
+    const opt = o as ConfigOption & { options?: RawChoice[] }
+    // Select options may come grouped; flatten them.
+    const options = (opt.options ?? []).flatMap((c: RawChoice) =>
+      Array.isArray(c.options) ? c.options : [c]
+    )
+    return {
+      id: opt.id,
+      name: opt.name,
+      description: opt.description,
+      category: opt.category,
+      type: opt.type === 'boolean' ? 'boolean' : 'select',
+      currentValue: opt.currentValue,
+      options: options
+        .filter((c) => typeof c.value === 'string')
+        .map((c) => ({ value: c.value!, name: c.name ?? c.value!, description: c.description }))
+    }
+  })
 }
