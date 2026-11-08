@@ -33,12 +33,12 @@ const ease = [0.22, 1, 0.36, 1] as const
 
 function Steps({ step }: { step: number }): React.JSX.Element {
   return (
-    <ol className="flex items-center gap-2">
+    <ol className="flex w-full items-center gap-2">
       {STEPS.map((label, i) => (
-        <li key={label} className="flex items-center gap-2">
+        <li key={label} className={cn('flex items-center gap-2', i < STEPS.length - 1 && 'flex-1')}>
           <span
             className={cn(
-              'flex items-center gap-1.5 text-xs transition-colors duration-300',
+              'flex shrink-0 items-center gap-1.5 text-xs whitespace-nowrap transition-colors duration-300',
               i <= step ? 'text-foreground' : 'text-muted-foreground'
             )}
           >
@@ -69,7 +69,7 @@ function Steps({ step }: { step: number }): React.JSX.Element {
             {label}
           </span>
           {i < STEPS.length - 1 && (
-            <span className="bg-border relative h-px w-8 overflow-hidden">
+            <span className="bg-border relative h-px min-w-4 flex-1 overflow-hidden">
               <motion.span
                 className="bg-foreground absolute inset-0 origin-left"
                 animate={{ scaleX: i < step ? 1 : 0 }}
@@ -476,7 +476,7 @@ export function Onboarding({
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease }}
-            className="mb-10 flex items-center justify-between"
+            className="mb-10 flex flex-col gap-7"
           >
             <div className="flex items-center gap-2.5">
               <CutroomMark className="size-8" />
