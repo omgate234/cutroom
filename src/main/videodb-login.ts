@@ -125,7 +125,8 @@ export async function loginVideoDb(): Promise<string> {
           state,
           code_challenge: challenge,
           code_challenge_method: 'S256',
-          scope: 'videodb'
+          scope: 'videodb',
+          signup_app: 'cutroom'
         })
         await shell.openExternal(`${ORIGIN}/oauth/authorize?${query}`)
       } catch (e) {
