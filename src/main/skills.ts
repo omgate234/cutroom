@@ -73,7 +73,13 @@ export async function installSkills(agents: AgentKind[]): Promise<{ ok: boolean;
     if (!res.ok) throw new Error(`GitHub returned ${res.status}`)
     const tgz = join(work, 'skills.tgz')
     await fs.writeFile(tgz, Buffer.from(await res.arrayBuffer()))
-    await exec('tar', ['-xzf', tgz, '-C', work])
+    // Windows 10+ ships bsdtar in System32. Call it by path: Git's GNU tar, if earlier on PATH,
+    // reads "C:\..." as a remote host.
+    const tar =
+      process.platform === 'win32'
+        ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+        : 'tar'
+    await exec(tar, ['-xzf', tgz, '-C', work], { windowsHide: true })
     const root = (await fs.readdir(work, { withFileTypes: true })).find((e) => e.isDirectory())
     if (!root) throw new Error('empty archive')
     const skills = await findSkills(join(work, root.name))
@@ -88,7 +94,9 @@ export async function installSkills(agents: AgentKind[]): Promise<{ ok: boolean;
         const link = join(claudeDir, s.name)
         await fs.mkdir(dirname(link), { recursive: true })
         await fs.rm(link, { recursive: true, force: true })
-        await fs.symlink(relative(dirname(link), dest), link, 'dir')
+        // Windows: a junction (absolute target) needs no admin rights, unlike a symlink.
+        if (process.platform === 'win32') await fs.symlink(dest, link, 'junction')
+        else await fs.symlink(relative(dirname(link), dest), link, 'dir')
       }
     }
     return { ok: true, output: `Installed ${skills.map((s) => s.name).join(', ')}` }

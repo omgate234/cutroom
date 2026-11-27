@@ -44,6 +44,7 @@ import {
 import type { ProjectState } from '@shared/ipc'
 import type { MediaItem, Timeline, TimelineClip } from '@shared/timeline'
 import { timelineDuration } from '@shared/timeline'
+import { MEDIA_MIME, mediaDrag } from '@/lib/drag'
 import type { ProjectApi } from '@/hooks/use-project'
 import { frameAt, frameStyle } from '@/lib/sprite'
 import { errMsg, tc } from '@/lib/format'
@@ -172,6 +173,7 @@ export function MediaPanel({
     <div
       className="relative flex h-full flex-col"
       onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return
         e.preventDefault()
         setDragging(true)
       }}
@@ -179,6 +181,7 @@ export function MediaPanel({
         if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false)
       }}
       onDrop={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return
         e.preventDefault()
         setDragging(false)
         importPaths([...e.dataTransfer.files].map((f) => window.api.pathForFile(f)).filter(Boolean))
@@ -254,7 +257,17 @@ export function MediaPanel({
                   ease: [0.22, 1, 0.36, 1]
                 }}
               >
-                <Item size="sm" className="hover:bg-muted/50 group/media px-1.5 py-1.5">
+                <Item
+                  size="sm"
+                  className="hover:bg-muted/50 group/media cursor-grab px-1.5 py-1.5"
+                  draggable={m.status !== 'uploading' && m.status !== 'failed'}
+                  onDragStart={(e) => {
+                    mediaDrag.item = m
+                    e.dataTransfer.setData(MEDIA_MIME, m.id)
+                    e.dataTransfer.effectAllowed = 'copy'
+                  }}
+                  onDragEnd={() => (mediaDrag.item = null)}
+                >
                   <ItemMedia className="self-center">
                     <ScrubThumb m={m} />
                   </ItemMedia>

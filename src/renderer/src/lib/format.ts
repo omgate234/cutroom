@@ -5,6 +5,13 @@ export function tc(sec: number | undefined): string {
   return `${m}:${(s % 60).toFixed(1).padStart(4, '0')}`
 }
 
+const MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
+// Shortcut labels: ⌘Z on macOS, Ctrl+Z elsewhere. Pass the macOS spelling.
+export const kbd = (mac: string): string =>
+  MAC ? mac : mac.replace('⇧⌘', 'Ctrl+Shift+').replace('⌘', 'Ctrl+').replace('⌫', 'Del')
+export const FILE_MANAGER = MAC ? 'Finder' : 'File Explorer'
+export const TRASH = MAC ? 'Trash' : 'Recycle Bin'
+
 export const errMsg = (e: unknown): string => {
   const m = (e as Error)?.message ?? String(e)
   return m.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')

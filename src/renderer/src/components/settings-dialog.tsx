@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useTheme } from 'next-themes'
 import { toast } from 'sonner'
-import { Check, CircleAlert, ExternalLink, KeyRound, Monitor, Moon, Sun } from 'lucide-react'
+import { Check, Monitor, Moon, Sun } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -13,7 +13,6 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
-import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import {
   Select,
   SelectContent,
@@ -24,6 +23,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import type { AgentInfo, AgentKind } from '@shared/ipc'
 import { AGENT_LABEL, AgentIcon } from '@/components/brand'
+import { VideoDbConnect } from './videodb-connect'
 import { SkillsPanel } from '@/components/skills-panel'
 
 export function SettingsDialog({
@@ -33,7 +33,6 @@ export function SettingsDialog({
   open: boolean
   onOpenChange: (o: boolean) => void
 }): React.JSX.Element {
-  const [apiKey, setApiKey] = useState('')
   const [agent, setAgent] = useState<AgentKind>('claude')
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [saving, setSaving] = useState(false)
@@ -44,7 +43,6 @@ export function SettingsDialog({
     if (!open) return
     setError('')
     void window.api.settings.get().then((s) => {
-      setApiKey(s.apiKey)
       setAgent(s.agent)
     })
     void window.api.detectAgents().then(setAgents)
@@ -52,12 +50,16 @@ export function SettingsDialog({
 
   const save = async (): Promise<void> => {
     setSaving(true)
-    const r = await window.api.settings.validateKey(apiKey)
-    setSaving(false)
-    if (!r.ok) return setError(r.error)
-    await window.api.settings.set({ apiKey: apiKey.trim(), agent })
-    toast.success('Settings saved', { description: 'The next agent session uses them.' })
-    onOpenChange(false)
+    setError('')
+    try {
+      await window.api.settings.set({ agent })
+      toast.success('Settings saved', { description: 'The next agent session uses them.' })
+      onOpenChange(false)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -69,33 +71,16 @@ export function SettingsDialog({
         </DialogHeader>
         <div className="grid gap-5">
           <div className="grid gap-2">
-            <Label htmlFor="apikey">VideoDB API key</Label>
-            <InputGroup>
-              <InputGroupAddon>
-                {error ? <CircleAlert className="text-destructive" /> : <KeyRound />}
-              </InputGroupAddon>
-              <InputGroupInput
-                id="apikey"
-                type="password"
-                className="font-mono"
-                value={apiKey}
-                onChange={(e) => {
-                  setApiKey(e.target.value)
-                  setError('')
-                }}
-                onKeyDown={(e) => e.key === 'Enter' && void save()}
-              />
-            </InputGroup>
-            {error ? (
-              <p className="text-destructive text-xs">{error}</p>
-            ) : (
-              <button
-                className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-xs"
-                onClick={() => void window.api.openExternal('https://console.videodb.io')}
-              >
-                console.videodb.io <ExternalLink className="size-3" />
-              </button>
-            )}
+            <Label>VideoDB account</Label>
+            <VideoDbConnect
+              onConnected={() => {
+                setError('')
+                toast.success('VideoDB account connected')
+              }}
+            />
+            <p className="text-muted-foreground text-xs">
+              Signing in changes the connected account immediately.
+            </p>
           </div>
           <div className="grid gap-2">
             <Label>Agent</Label>
@@ -114,7 +99,9 @@ export function SettingsDialog({
                         {!info
                           ? ''
                           : info.usable
-                            ? `v${info.version}`
+                            ? info.signedIn === false
+                              ? 'not signed in'
+                              : `v${info.version}`
                             : info.installed
                               ? 'update needed'
                               : 'not installed'}
@@ -124,6 +111,11 @@ export function SettingsDialog({
                 })}
               </SelectContent>
             </Select>
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              Cutroom uses your local CLI login. For Codex, run <code>codex login</code>; for Claude
+              Code, run <code>claude auth login</code> in a terminal. Signing into the web apps
+              alone is not enough. You can close the terminal after login.
+            </p>
           </div>
           <div className="grid gap-2">
             <Label>VideoDB skills</Label>
@@ -150,6 +142,11 @@ export function SettingsDialog({
             </ToggleGroup>
           </div>
         </div>
+        {error && (
+          <p role="alert" className="text-destructive text-xs">
+            {error}
+          </p>
+        )}
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel

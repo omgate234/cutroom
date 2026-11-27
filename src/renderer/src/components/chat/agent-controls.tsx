@@ -49,7 +49,7 @@ function OptionSelect({ o, icon }: { o: ConfigOption; icon: React.ReactNode }): 
         </TooltipTrigger>
         <TooltipContent>{o.name}</TooltipContent>
       </Tooltip>
-      <SelectContent className="max-h-80">
+      <SelectContent position="popper" side="top" align="start" className="max-h-80">
         {o.options.map((c) => (
           <SelectItem key={c.value} value={c.value}>
             <span className="flex flex-col">

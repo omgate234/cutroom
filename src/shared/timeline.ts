@@ -1,6 +1,8 @@
 // Project timeline = VideoDB editor wire format plus ids/names for targeted edits.
 // toWire() strips those and fills the same defaults the SDK sends.
 
+import { MOTION_PRESETS, EASINGS, EFFECTS, KEYFRAME_PROPERTIES, type Lut } from './effects'
+
 export type AssetType = 'video' | 'audio' | 'image' | 'text' | 'caption'
 
 export interface TimelineAsset {
@@ -32,6 +34,7 @@ export interface TimelineTrack {
 }
 
 export interface Timeline {
+  lut?: Lut
   background?: string
   resolution?: string
   tracks: TimelineTrack[]
@@ -92,8 +95,21 @@ export function validateTimeline(raw: unknown, assets: AssetsFile): Issue[] {
   const issues: Issue[] = []
   const add = (path: string, message: string): void => void issues.push({ path, message })
   if (!isObj(raw)) return [{ path: '', message: 'timeline.json must be an object' }]
-  if (raw.resolution !== undefined && !/^\d+x\d+$/.test(String(raw.resolution)))
+  if (raw.resolution !== undefined && (!/^[1-9]\d*x[1-9]\d*$/.test(String(raw.resolution))))
     add('resolution', 'must look like "1920x1080"')
+  const finite = (v: unknown, min: number, max = Infinity): v is number =>
+    typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max
+  const lut = (value: unknown, path: string): void => {
+    if (value === undefined) return
+    if (
+      !isObj(value) ||
+      typeof value.src !== 'string' ||
+      !/^https?:\/\//.test(value.src) ||
+      !finite(value.intensity ?? 1, 0, 1)
+    )
+      add(path, 'requires an uploaded LUT URL and intensity 0..1; import local .cube files first')
+  }
+  lut(raw.lut, 'lut')
   if (!Array.isArray(raw.tracks))
     return [...issues, { path: 'tracks', message: 'must be an array' }]
 
@@ -112,19 +128,78 @@ export function validateTimeline(raw: unknown, assets: AssetsFile): Issue[] {
       else if (ids.has(id)) add(`${p}.id`, `duplicate id "${id}"`)
       ids.add(id)
       const start = item.start
-      if (typeof start !== 'number' || start < 0) add(`${p}.start`, 'must be a number >= 0')
+      if (!finite(start, 0)) add(`${p}.start`, 'must be a number >= 0')
       const clip = item.clip
       if (!isObj(clip)) return add(`${p}.clip`, 'missing clip object')
       const dur = clip.duration
-      if (typeof dur !== 'number' || dur <= 0) add(`${p}.clip.duration`, 'must be a number > 0')
+      if (!finite(dur, Number.MIN_VALUE)) add(`${p}.clip.duration`, 'must be a number > 0')
       for (const k of ['scale', 'opacity'] as const) {
         const v = clip[k]
-        if (v !== undefined && (typeof v !== 'number' || v < 0 || v > (k === 'scale' ? 10 : 1)))
+        if (v !== undefined && !finite(v, 0, k === 'scale' ? 10 : 1))
           add(`${p}.clip.${k}`, k === 'scale' ? 'must be 0..10' : 'must be 0..1')
       }
       const asset = clip.asset
       if (!isObj(asset)) return add(`${p}.clip.asset`, 'missing asset object')
       const type = asset.type
+      lut(clip.lut, `${p}.clip.lut`)
+      if ((type === 'audio' || type === 'caption') && (clip.lut || clip.motion || clip.effect))
+        add(`${p}.clip`, 'LUTs, motion and effects require a video, image or text clip')
+      if (clip.effect !== undefined && !EFFECTS.includes(clip.effect as never))
+        add(`${p}.clip.effect`, 'unknown effect')
+      if (clip.motion !== undefined) {
+        const m = clip.motion
+        if (!isObj(m)) add(`${p}.clip.motion`, 'must be an object')
+        else {
+          if (clip.effect || clip.transition)
+            add(`${p}.clip.motion`, 'remove effect and transition before using motion')
+          for (const edge of ['enter', 'exit']) {
+            const v = m[edge]
+            if (v === undefined) continue
+            if (
+              !isObj(v) ||
+              !MOTION_PRESETS.includes(v.preset as never) ||
+              !finite(v.duration ?? 0.4, Number.MIN_VALUE, 10) ||
+              !finite(v.amount ?? 0.08, 0, 1) ||
+              !EASINGS.includes((v.easing ?? 'ease_out') as never)
+            )
+              add(`${p}.clip.motion.${edge}`, 'invalid preset, duration, amount or easing')
+          }
+          if (m.keyframes !== undefined) {
+            if (!isObj(m.keyframes)) add(`${p}.clip.motion.keyframes`, 'must be an object')
+            else
+              for (const [prop, frames] of Object.entries(m.keyframes)) {
+                const path = `${p}.clip.motion.keyframes.${prop}`
+                if (
+                  !KEYFRAME_PROPERTIES.includes(prop as never) ||
+                  !Array.isArray(frames) ||
+                  !frames.length
+                ) {
+                  add(path, 'unknown property or empty keyframes')
+                  continue
+                }
+                let previous = -1
+                for (const f of frames) {
+                  if (
+                    !isObj(f) ||
+                    !finite(f.time, 0) ||
+                    f.time <= previous ||
+                    !finite(
+                      f.value,
+                      prop === 'scale' || prop === 'opacity' ? 0 : -Infinity,
+                      prop === 'opacity' ? 1 : prop === 'scale' ? 10 : Infinity
+                    ) ||
+                    !EASINGS.includes((f.easing ?? 'linear') as never)
+                  )
+                    add(
+                      path,
+                      'keyframes need ordered nonnegative times, finite values and valid easing'
+                    )
+                  if (isObj(f) && typeof f.time === 'number') previous = f.time
+                }
+              }
+          }
+        }
+      }
       if (type === 'video' || type === 'audio' || type === 'image') {
         const m = typeof asset.id === 'string' ? media.get(asset.id) : undefined
         if (!m)
@@ -135,7 +210,7 @@ export function validateTimeline(raw: unknown, assets: AssetsFile): Issue[] {
           if (m.status === 'uploading' || m.status === 'failed')
             add(`${p}.clip.asset.id`, `media ${m.id} is ${m.status}`)
           const from = typeof asset.start === 'number' ? asset.start : 0
-          if (from < 0) add(`${p}.clip.asset.start`, 'must be >= 0')
+          if (asset.start !== undefined && !finite(asset.start, 0)) add(`${p}.clip.asset.start`, 'must be a finite number >= 0')
           if (
             type !== 'image' &&
             m.duration &&
@@ -148,6 +223,13 @@ export function validateTimeline(raw: unknown, assets: AssetsFile): Issue[] {
             )
         }
       } else if (type === 'text') {
+        if (asset.font !== undefined) {
+          if (!isObj(asset.font)) add(`${p}.clip.asset.font`, 'must be an object')
+          else {
+            if (asset.font.weight !== undefined && (!finite(asset.font.weight, 100, 900) || !Number.isInteger(asset.font.weight))) add(`${p}.clip.asset.font.weight`, 'use a numeric weight such as 400 or 700, not a name like bold')
+            if (asset.font.size !== undefined && !finite(asset.font.size, Number.MIN_VALUE)) add(`${p}.clip.asset.font.size`, 'must be a positive finite number')
+          }
+        }
         if (typeof asset.text !== 'string' || !asset.text)
           add(`${p}.clip.asset.text`, 'text asset needs text')
       } else if (type !== 'caption') {
@@ -191,6 +273,7 @@ const CLIP_DEFAULTS = {
 export function toWire(t: Timeline): { timeline: Record<string, unknown> } {
   return {
     timeline: {
+      ...(t.lut ? { lut: t.lut } : {}),
       background: t.background ?? '#000000',
       resolution: t.resolution ?? '1920x1080',
       tracks: t.tracks.map((track, i) => ({

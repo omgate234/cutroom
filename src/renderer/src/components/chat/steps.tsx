@@ -27,7 +27,8 @@ import {
   Trash2,
   Wrench,
   X,
-  type LucideIcon
+  type LucideIcon,
+  Captions
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
@@ -35,21 +36,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import type { PermissionAsk } from '@shared/ipc'
 import { cn } from '@/lib/utils'
 
-export type Block = { type: string; text?: string; data?: string; mimeType?: string }
-export type ToolContent =
-  | { type: 'content'; content: Block }
-  | { type: 'diff'; path: string; oldText?: string | null; newText: string }
-  | { type: 'terminal'; terminalId: string }
-
-export interface ToolItem {
-  type: 'tool'
-  id: string
-  title: string
-  kind?: string | null
-  status?: string | null
-  rawInput?: unknown
-  content: ToolContent[]
-}
+export type { Block, ToolContent, ToolItem } from '@shared/chat'
+import type { ToolContent, ToolItem } from '@shared/chat'
 
 // One fixed vocabulary: ACP tool kinds, then the VideoDB tools (MCP or the vdb CLI) by name.
 const KIND_ICON: Record<string, LucideIcon> = {
@@ -79,7 +67,11 @@ const VDB: Record<string, { icon: LucideIcon; label: string }> = {
   inspect_cuts: { icon: Scissors, label: 'Inspect cuts' },
   cuts: { icon: Scissors, label: 'Inspect cuts' },
   export_video: { icon: Download, label: 'Export video' },
-  export: { icon: Download, label: 'Export video' }
+  export: { icon: Download, label: 'Export video' },
+  import_media: { icon: FolderInput, label: 'Import media' },
+  import: { icon: FolderInput, label: 'Import media' },
+  caption_presets: { icon: Captions, label: 'Caption styles' },
+  presets: { icon: Captions, label: 'Caption styles' }
 }
 
 export function describeTool(t: Pick<ToolItem, 'title' | 'kind' | 'rawInput'>): {
@@ -88,7 +80,7 @@ export function describeTool(t: Pick<ToolItem, 'title' | 'kind' | 'rawInput'>): 
   detail?: string
   videodb: boolean
 } {
-  const mcp = t.title.match(/mcp__videodb__(\w+)|^videodb[_.:\s]+(\w+)/i)
+  const mcp = t.title.match(/mcp__(?:cutroom|videodb)__(\w+)|^(?:cutroom|videodb)[_.:\s]+(\w+)/i)
   const name = mcp?.[1] ?? mcp?.[2]
   if (name && VDB[name]) return { ...VDB[name], videodb: true }
   const cmd =

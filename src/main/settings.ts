@@ -8,12 +8,28 @@ const DEFAULTS: Settings = { apiKey: '', agent: 'claude', recent: [], onboarded:
 
 export async function getSettings(): Promise<Settings> {
   const s = { ...DEFAULTS, ...(await readJson<Partial<Settings>>(file(), {})) }
-  if (!s.apiKey && process.env.VIDEO_DB_API_KEY) s.apiKey = process.env.VIDEO_DB_API_KEY
+  if (s.videoDbAuth !== 'sso' || !s.apiKey) {
+    s.apiKey = ''
+    s.onboarded = false
+  }
   return s
 }
 
-export async function setSettings(patch: Partial<Settings>): Promise<Settings> {
-  const next = { ...(await getSettings()), ...patch }
-  await writeJson(file(), next)
-  return next
+let writes: Promise<unknown> = Promise.resolve()
+export function setSettings(patch: Partial<Settings>): Promise<Settings> {
+  const run = writes.then(async () => {
+    const current = await getSettings()
+    const next = { ...current, ...patch }
+    if (patch.agentConfig) {
+      next.agentConfig = { ...current.agentConfig }
+      for (const kind of Object.keys(patch.agentConfig) as (keyof NonNullable<
+        Settings['agentConfig']
+      >)[])
+        next.agentConfig[kind] = { ...current.agentConfig?.[kind], ...patch.agentConfig[kind] }
+    }
+    await writeJson(file(), next, 0o600)
+    return next
+  })
+  writes = run.catch(() => undefined)
+  return run
 }

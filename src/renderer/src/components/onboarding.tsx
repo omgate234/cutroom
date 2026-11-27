@@ -1,31 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
-import { AnimatePresence, motion, useAnimate } from 'motion/react'
-import {
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  ClipboardPaste,
-  Copy,
-  ExternalLink,
-  FolderOpen,
-  FolderPlus,
-  KeyRound,
-  CircleAlert
-} from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
+import { ArrowLeft, ArrowRight, Check, FolderOpen, FolderPlus, KeyRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Spinner } from '@/components/ui/spinner'
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput
-} from '@/components/ui/input-group'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { AgentInfo, AgentKind, Settings } from '@shared/ipc'
 import { AgentIcon, CutroomMark } from '@/components/brand'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { SkillsPanel } from '@/components/skills-panel'
+import { CopyCommand, SignInCard } from '@/components/sign-in-card'
+import { VideoDbConnect } from './videodb-connect'
 import { cn } from '@/lib/utils'
 
 const STEPS = ['VideoDB', 'Agent', 'Skills', 'Ready'] as const
@@ -83,160 +66,18 @@ function Steps({ step }: { step: number }): React.JSX.Element {
   )
 }
 
-function KeyStep({
-  initial,
-  onDone
-}: {
-  initial: string
-  onDone: (key: string) => void
-}): React.JSX.Element {
-  const [key, setKey] = useState(initial)
-  const [state, setState] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
-  const [message, setMessage] = useState('')
-  const [scope, animate] = useAnimate()
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => inputRef.current?.focus(), [])
-
-  const check = async (value = key): Promise<void> => {
-    const k = value.trim()
-    if (!k || state === 'checking') return
-    setState('checking')
-    const r = await window.api.settings.validateKey(k)
-    if (r.ok) {
-      setState('ok')
-      setMessage(`Connected to “${r.collection}”`)
-      window.setTimeout(() => onDone(k), 750)
-    } else {
-      setState('error')
-      setMessage(r.error)
-      void animate(scope.current, { x: [0, -8, 8, -5, 5, 0] }, { duration: 0.4 })
-    }
-  }
-
-  const paste = async (): Promise<void> => {
-    const text = (await navigator.clipboard.readText().catch(() => '')).trim()
-    if (!text) return
-    setKey(text)
-    setState('idle')
-    void check(text)
-  }
-
+function AccountStep({ onDone }: { onDone: () => void }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-5">
       <div className="space-y-1.5">
         <h1 className="text-2xl font-semibold tracking-tight">Connect VideoDB</h1>
         <p className="text-muted-foreground text-sm">
-          Your footage is uploaded, transcribed, searched and rendered through your VideoDB account.
-          The key stays on this machine.
+          Sign in securely through your browser. Your footage is uploaded, transcribed, searched and
+          rendered through the VideoDB account you choose.
         </p>
       </div>
-      <div ref={scope}>
-        <InputGroup
-          className={cn(
-            'h-11 transition-shadow',
-            state === 'error' && 'border-destructive! ring-destructive/20! ring-3'
-          )}
-        >
-          <InputGroupAddon>
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.span
-                key={state}
-                initial={{ scale: 0.5, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.5, opacity: 0 }}
-                className="inline-flex"
-              >
-                {state === 'checking' ? (
-                  <Spinner />
-                ) : state === 'ok' ? (
-                  <Check className="text-emerald-500" strokeWidth={3} />
-                ) : state === 'error' ? (
-                  <CircleAlert className="text-destructive" />
-                ) : (
-                  <KeyRound />
-                )}
-              </motion.span>
-            </AnimatePresence>
-          </InputGroupAddon>
-          <InputGroupInput
-            ref={inputRef}
-            type="password"
-            placeholder="Paste your API key"
-            className="font-mono text-sm"
-            value={key}
-            onChange={(e) => {
-              setKey(e.target.value)
-              if (state !== 'checking') setState('idle')
-            }}
-            onKeyDown={(e) => e.key === 'Enter' && void check()}
-          />
-          <InputGroupAddon align="inline-end">
-            <InputGroupButton size="xs" onClick={() => void paste()}>
-              <ClipboardPaste /> Paste
-            </InputGroupButton>
-          </InputGroupAddon>
-        </InputGroup>
-        <div className="mt-2 h-5 text-xs">
-          <AnimatePresence mode="wait">
-            {(state === 'ok' || state === 'error') && (
-              <motion.p
-                key={state + message}
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className={
-                  state === 'ok' ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'
-                }
-              >
-                {message}
-              </motion.p>
-            )}
-          </AnimatePresence>
-        </div>
-      </div>
-      <div className="flex items-center justify-between">
-        <button
-          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition-colors"
-          onClick={() => void window.api.openExternal('https://console.videodb.io')}
-        >
-          Get a free key <ExternalLink className="size-3" />
-        </button>
-        <Button
-          onClick={() => void check()}
-          disabled={!key.trim() || state === 'checking' || state === 'ok'}
-        >
-          {state === 'checking' ? 'Checking' : 'Continue'} <ArrowRight />
-        </Button>
-      </div>
+      <VideoDbConnect onConnected={onDone} />
     </div>
-  )
-}
-
-function CopyCommand({ text }: { text: string }): React.JSX.Element {
-  const [copied, setCopied] = useState(false)
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          className="bg-muted hover:bg-muted/70 group/cmd flex max-w-full items-center gap-2 rounded-md px-2 py-1 font-mono text-[11px] transition-colors"
-          onClick={(e) => {
-            e.stopPropagation()
-            void navigator.clipboard.writeText(text)
-            setCopied(true)
-            window.setTimeout(() => setCopied(false), 1400)
-          }}
-        >
-          <span className="truncate">{text}</span>
-          {copied ? (
-            <Check className="size-3 shrink-0 text-emerald-500" />
-          ) : (
-            <Copy className="size-3 shrink-0 opacity-60" />
-          )}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent>{copied ? 'Copied' : 'Copy'}</TooltipContent>
-    </Tooltip>
   )
 }
 
@@ -262,13 +103,31 @@ function AgentStep({
   }
   useEffect(detect, [initial])
 
+  const picked = agents?.find((a) => a.kind === pick)
+  const needsLogin = picked?.signedIn === false
+  // Sign-in happens in a terminal and the browser; re-check when the user comes back.
+  useEffect(() => {
+    if (!needsLogin || !pick) return
+    const recheck = (): void =>
+      void window.api
+        .signedIn(pick)
+        .then((ok: boolean | undefined) =>
+          setAgents((list) =>
+            list ? list.map((a) => (a.kind === pick ? { ...a, signedIn: ok } : a)) : list
+          )
+        )
+    window.addEventListener('focus', recheck)
+    return () => window.removeEventListener('focus', recheck)
+  }, [needsLogin, pick])
+
   return (
     <div className="flex flex-col gap-5">
       <div className="space-y-1.5">
         <h1 className="text-2xl font-semibold tracking-tight">Pick your agent</h1>
         <p className="text-muted-foreground text-sm">
-          Cutroom drives the coding agent you already use. It signs in with your own account; you
-          can switch any time.
+          Install and sign into Codex CLI or Claude Code CLI on this computer, or use Pi. A login to
+          the ChatGPT or Claude web app does not connect your agent to Cutroom. You can switch
+          agents any time.
         </p>
       </div>
       <div role="radiogroup" className="flex flex-col gap-2">
@@ -316,6 +175,9 @@ function AgentStep({
                   {info?.installed && !info.usable && (
                     <Badge variant="outline">Update needed</Badge>
                   )}
+                  {info?.usable && info.signedIn === false && (
+                    <Badge variant="outline">Not signed in</Badge>
+                  )}
                 </span>
                 {info?.note && <CopyCommand text={info.note.replace(/^.*Update: /, '')} />}
                 {info?.note?.startsWith('Needs') && (
@@ -345,6 +207,18 @@ function AgentStep({
           )
         })}
       </div>
+      <AnimatePresence>
+        {needsLogin && picked && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <SignInCard name={picked.name} kind={picked.kind} command={picked.login} />
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div className="flex items-center justify-between">
         <Button variant="ghost" onClick={onBack}>
           <ArrowLeft /> Back
@@ -353,7 +227,7 @@ function AgentStep({
           <Button variant="ghost" size="sm" onClick={detect} disabled={!agents}>
             Re-check
           </Button>
-          <Button onClick={() => pick && onDone(pick)} disabled={!pick}>
+          <Button onClick={() => pick && onDone(pick)} disabled={!pick || needsLogin}>
             Continue <ArrowRight />
           </Button>
         </div>
@@ -465,7 +339,7 @@ export function Onboarding({
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
-      <div className="drag flex h-11 shrink-0 items-center justify-end px-3">
+      <div className="drag flex h-11 shrink-0 items-center justify-end px-3 win:pr-36">
         <div className="no-drag">
           <ThemeToggle />
         </div>
@@ -498,15 +372,7 @@ export function Onboarding({
               exit="exit"
               transition={{ duration: 0.28, ease }}
             >
-              {step === 0 && (
-                <KeyStep
-                  initial={settings.apiKey}
-                  onDone={(apiKey) => {
-                    void window.api.settings.set({ apiKey })
-                    go(1)
-                  }}
-                />
-              )}
+              {step === 0 && <AccountStep onDone={() => go(1)} />}
               {step === 1 && (
                 <AgentStep
                   initial={agent}

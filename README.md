@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/omgate234/cutroom/releases/latest"><b>Download for macOS</b></a>
+  <a href="https://github.com/omgate234/cutroom/releases/latest"><b>Download for macOS or Windows</b></a>
 </p>
 
 ---
@@ -25,6 +25,8 @@
 
 ## Install
 
+**macOS**
+
 1. Download the DMG for your Mac from [Releases](https://github.com/omgate234/cutroom/releases/latest) (`arm64` for Apple silicon, `x64` for Intel).
 2. Drag Cutroom to Applications.
 3. The app is not notarized yet. On first launch macOS will refuse to open it; run this once, then open it normally:
@@ -33,10 +35,25 @@
    xattr -dr com.apple.quarantine /Applications/Cutroom.app
    ```
 
+**Windows 10/11**
+
+1. Download `Cutroom-<version>-x64-setup.exe` (or `arm64` for Windows on ARM) from [Releases](https://github.com/omgate234/cutroom/releases/latest).
+2. Run it. It installs for your user only, no admin prompt.
+3. The installer is not code-signed yet, so SmartScreen says "Windows protected your PC". Click **More info**, then **Run anyway**.
+4. Install [Git for Windows](https://git-scm.com/download/win) if you don't have it: Claude Code needs it, and Cutroom uses it for undo history.
+
 You also need:
 
-- A VideoDB API key, free at [console.videodb.io](https://console.videodb.io).
+- A VideoDB account. Connect through **Sign in with VideoDB** in your browser; Cutroom uses SSO only.
 - At least one agent installed and signed in: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex) or [Pi](https://github.com/earendil-works/pi) (0.81+).
+
+**Sign into the CLI on the same computer where you run Cutroom.** Being signed into the ChatGPT or Claude web app is not enough.
+
+- **Codex CLI:** open a terminal and run `codex login`.
+- **Claude Code CLI:** open a terminal and run `claude auth login`.
+- **Pi:** run `pi`, then type `/login`.
+
+Complete the login flow started by the CLI and wait for the terminal to confirm success. Return to Cutroom and click **Re-check** during onboarding or **Retry** in chat if needed. You can close the terminal after login; it does not need to stay open while using Cutroom.
 
 Onboarding checks all of this and can install the [VideoDB skills](https://github.com/video-db/skills) for each agent.
 
@@ -62,6 +79,7 @@ Every agent turn and manual edit is a git commit, so history and undo come for f
 npm install
 npm run dev        # run the app
 npm run build:mac  # build DMGs into dist/
+npm run build:win  # build Windows installers into dist/ (works from macOS too)
 ```
 
 Electron, React, [shadcn/ui](https://ui.shadcn.com), Tailwind. Main process in `src/main`, the MCP server and CLI in `src/mcp`, shared VideoDB and timeline code in `src/shared`, UI in `src/renderer`.

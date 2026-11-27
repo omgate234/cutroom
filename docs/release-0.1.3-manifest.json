@@ -1,0 +1,17 @@
+[
+  {
+    "file": "cut-room-0.1.3-mac-arm64.dmg",
+    "bytes": 140285025,
+    "sha256": "e5afb98aed435771d1e6711e652846a9007311dc43e6b40bd7b2195db395927e"
+  },
+  {
+    "file": "cut-room-0.1.3-mac-x64.dmg",
+    "bytes": 145866799,
+    "sha256": "3b8bfa57d65ffd116d3c5d4b598fbabd7e92fc2750d71fc439e2441d5dc3a3ec"
+  },
+  {
+    "file": "cut-room-0.1.3-win-x64.exe",
+    "bytes": 113691356,
+    "sha256": "3676e524a6b93ef0a65c1152fe7516791d43cf0e30d755ab0018d0d12b85a7ad"
+  }
+]
