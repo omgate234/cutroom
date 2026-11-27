@@ -44,9 +44,10 @@ import {
 import { SettingsDialog } from '@/components/settings-dialog'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { AGENT_LABEL, AgentIcon, CutroomMark } from '@/components/brand'
+import { Spinner } from '@/components/ui/spinner'
 import type { ProjectSummary, Settings } from '@shared/ipc'
 import { frameAt, frameStyle } from '@/lib/sprite'
-import { ago, errMsg, tc } from '@/lib/format'
+import { FILE_MANAGER, TRASH, ago, errMsg, kbd, tc } from '@/lib/format'
 
 const ease = [0.22, 1, 0.36, 1] as const
 
@@ -180,6 +181,16 @@ export function Welcome({
   }, [])
 
   useEffect(load, [load])
+
+  // Projects whose agent is still mid-turn after you left them.
+  const [busy, setBusy] = useState<string[]>([])
+  useEffect(() => {
+    void window.api.agent.busy().then(setBusy)
+    return window.api.on('agents:busy', (dirs: string[]) => {
+      setBusy(dirs)
+      load()
+    })
+  }, [load])
   useEffect(() => {
     void window.api.settings.get().then(setSettings)
   }, [settingsOpen])
@@ -210,7 +221,7 @@ export function Welcome({
     try {
       if (await window.api.projects.remove(p.dir, p.name, p.owned)) {
         setProjects((list) => list?.filter((x) => x.dir !== p.dir) ?? null)
-        toast.success(p.owned ? 'Moved to Trash' : 'Removed from Cutroom')
+        toast.success(p.owned ? `Moved to ${TRASH}` : 'Removed from Cutroom')
       }
     } catch (e) {
       toast.error(errMsg(e))
@@ -224,7 +235,7 @@ export function Welcome({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="drag flex h-11 shrink-0 items-center justify-end gap-0.5 px-3">
+      <div className="drag flex h-11 shrink-0 items-center justify-end gap-0.5 px-3 win:pr-36">
         <div className="no-drag flex items-center gap-0.5">
           <ThemeToggle />
           <Button
@@ -276,7 +287,7 @@ export function Welcome({
             </Button>
             <Button onClick={() => void create()} disabled={creating}>
               <Plus /> New project{' '}
-              <Kbd className="bg-primary-foreground/15 text-primary-foreground ml-1">⌘N</Kbd>
+              <Kbd className="bg-primary-foreground/15 text-primary-foreground ml-1">{kbd('⌘N')}</Kbd>
             </Button>
           </motion.header>
 
@@ -326,6 +337,11 @@ export function Welcome({
                             <FolderOpen className="size-2.5" /> folder
                           </Badge>
                         )}
+                        {busy.includes(p.dir) && (
+                          <Badge variant="secondary" className="h-4 gap-1 px-1 text-[10px]">
+                            <Spinner className="size-2.5" /> agent working
+                          </Badge>
+                        )}
                       </span>
                       {p.description && (
                         <span className="text-muted-foreground mt-0.5 line-clamp-2 block text-xs">
@@ -352,11 +368,11 @@ export function Welcome({
                           <Pencil /> Rename and describe
                         </DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => void window.api.reveal(p.dir)}>
-                          <FolderOpen /> Show in Finder
+                          <FolderOpen /> Show in {FILE_MANAGER}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem variant="destructive" onSelect={() => void remove(p)}>
-                          <Trash2 /> {p.owned ? 'Move to Trash' : 'Remove from list'}
+                          <Trash2 /> {p.owned ? `Move to ${TRASH}` : 'Remove from list'}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

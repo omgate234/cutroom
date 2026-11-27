@@ -5,8 +5,11 @@ import type { ProjectApi } from '@/hooks/use-project'
 import { TopBar } from '@/components/top-bar'
 import { MediaPanel } from '@/components/media-panel'
 import { Player } from '@/components/player'
-import { TimelineView } from '@/components/timeline-view'
+import { TimelineView, type Scrub } from '@/components/timeline-view'
 import { ChatPanel } from '@/components/chat-panel'
+import { Inspector } from '@/components/inspector'
+import { useEditor } from '@/hooks/use-editor'
+import { rangeSelectIds } from '@shared/timeline-ops'
 
 export function Workspace({
   api,
@@ -17,7 +20,12 @@ export function Workspace({
 }): React.JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [time, setTime] = useState(0)
-  const [selected, setSelected] = useState<string | null>(null)
+  const [scrub, setScrub] = useState<Scrub | null>(null)
+  const editor = useEditor(project, api.writeTimeline, rangeSelectIds)
+  // The inspector takes the media panel's place while one clip is selected; Back returns to media.
+  const [inspectorOff, setInspectorOff] = useState<string | null>(null)
+  const inspecting =
+    editor.primaryClip && inspectorOff !== editor.primaryClip.id ? editor.primaryClip : null
   const [draft, setDraft] = useState<{ text: string; n: number } | null>(null)
 
   const seek = useCallback((t: number) => {
@@ -30,10 +38,19 @@ export function Workspace({
 
   return (
     <div className="flex h-full flex-col">
-      <TopBar api={api} project={project} />
+      <TopBar api={api} project={project} editor={editor} />
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
         <ResizablePanel defaultSize="19" minSize={220}>
-          <MediaPanel project={project} api={api} onMention={mention} />
+          {inspecting ? (
+            <Inspector
+              editor={editor}
+              clip={inspecting}
+              media={project.assets.media.find((m) => m.id === inspecting.clip.asset.id)}
+              onClose={() => setInspectorOff(inspecting.id)}
+            />
+          ) : (
+            <MediaPanel project={project} api={api} onMention={mention} />
+          )}
         </ResizablePanel>
         <ResizableHandle />
         <ResizablePanel defaultSize="53" minSize={420}>
@@ -44,17 +61,17 @@ export function Workspace({
                 compile={api.compile}
                 timeline={project.timeline}
                 onTime={setTime}
+                scrub={scrub}
               />
             </ResizablePanel>
             <ResizableHandle />
             <ResizablePanel defaultSize="38" minSize={150}>
               <TimelineView
-                project={project}
+                editor={editor}
+                media={project.assets.media}
                 time={time}
                 onSeek={seek}
-                selected={selected}
-                onSelect={setSelected}
-                onChange={api.writeTimeline}
+                onScrub={setScrub}
                 onMention={mention}
               />
             </ResizablePanel>

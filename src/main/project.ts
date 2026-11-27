@@ -30,22 +30,33 @@ export class Project {
   private manualTimer?: NodeJS.Timeout
   private compileSeq = 0
   private understanding = new Set<string>()
+  lastCompile: CompileState = { state: 'idle' }
 
   constructor(
     readonly dir: string,
     private send: Send
   ) {}
 
+  // History is git; without git installed the project still works, just without checkpoints.
+  private noGit = false
   private git = (...args: string[]): Promise<{ stdout: string }> =>
     exec('git', ['-c', 'user.name=Cutroom', '-c', 'user.email=cutroom@local', ...args], {
-      cwd: this.dir
+      cwd: this.dir,
+      windowsHide: true
+    }).catch((e: NodeJS.ErrnoException) => {
+      if (e.code === 'ENOENT') this.noGit = true
+      throw e
     })
 
   async open(): Promise<ProjectState> {
     await scaffoldProject(this.dir)
-    if (!existsSync(`${this.dir}/.git`)) {
-      await this.git('init', '-q')
-      await this.checkpoint('New project')
+    if (!existsSync(join(this.dir, '.git'))) {
+      try {
+        await this.git('init', '-q')
+        await this.checkpoint('New project')
+      } catch (e) {
+        console.error('git unavailable, history disabled:', (e as Error).message)
+      }
     }
     this.watcher = chokidar.watch([paths(this.dir).timeline, paths(this.dir).assets], {
       ignoreInitial: true
@@ -75,10 +86,11 @@ export class Project {
     void this.watcher?.close()
     void this.inbox?.close()
     clearTimeout(this.compileTimer)
+    clearTimeout(this.manualTimer)
   }
 
   private async onChange(file: string): Promise<void> {
-    if (file === paths(this.dir).timeline) {
+    if (basename(file) === 'timeline.json') {
       this.send('project:timeline', await readTimeline(this.dir))
       this.scheduleCompile(600)
     } else {
@@ -94,7 +106,7 @@ export class Project {
     let result: ImportResult
     try {
       const { apiKey } = await getSettings()
-      if (!apiKey) throw new Error('No VideoDB API key set in Cutroom.')
+      if (!apiKey) throw new Error('Sign in with VideoDB in Settings first.')
       const m = await importMedia(this.dir, apiKey, req.source)
       result = {
         id: req.id,
@@ -122,18 +134,33 @@ export class Project {
   }
 
   // .cutroom/bin/vdb: the VideoDB tools as a shell command, for agents without MCP (Pi).
+  // Windows gets vdb.cmd too; the sh script still works under Git Bash, where `pwd -W` gives a
+  // Windows path that the bundled Node understands.
   private async writeCli(): Promise<void> {
     const bin = join(this.dir, '.cutroom', 'bin')
     await fs.mkdir(bin, { recursive: true })
+    const settings = join(app.getPath('userData'), 'settings.json')
+    const cli = join(__dirname, 'cli.js')
     const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
     const script = [
       '#!/bin/sh',
-      'CUTROOM_PROJECT="$(cd "$(dirname "$0")/../.." && pwd)" \\',
-      `CUTROOM_SETTINGS=${q(join(app.getPath('userData'), 'settings.json'))} \\`,
-      `ELECTRON_RUN_AS_NODE=1 exec ${q(process.execPath)} ${q(join(__dirname, 'cli.js'))} "$@"`,
+      'CUTROOM_PROJECT="$(cd "$(dirname "$0")/../.." && (pwd -W 2>/dev/null || pwd))" \\',
+      `CUTROOM_SETTINGS=${q(settings)} \\`,
+      `ELECTRON_RUN_AS_NODE=1 exec ${q(process.execPath)} ${q(cli)} "$@"`,
       ''
     ].join('\n')
     await fs.writeFile(join(bin, 'vdb'), script, { mode: 0o755 })
+    if (process.platform !== 'win32') return
+    const cmd = [
+      '@echo off',
+      'setlocal',
+      'for %%I in ("%~dp0..\\..") do set "CUTROOM_PROJECT=%%~fI"',
+      `set "CUTROOM_SETTINGS=${settings}"`,
+      'set "ELECTRON_RUN_AS_NODE=1"',
+      `"${process.execPath}" "${cli}" %*`,
+      ''
+    ].join('\r\n')
+    await fs.writeFile(join(bin, 'vdb.cmd'), cmd)
   }
 
   // Media left mid-indexing by a previous run gets picked up again; sprites back-filled.
@@ -150,6 +177,13 @@ export class Project {
     }
   }
 
+  resetConnection(): void {
+    this.compileSeq++
+    this.lastCompile = { state: 'idle', clear: true }
+    this.send('project:compile', this.lastCompile)
+    this.scheduleCompile(0)
+  }
+
   scheduleCompile(delay: number): void {
     clearTimeout(this.compileTimer)
     this.compileTimer = setTimeout(() => void this.compile(), delay)
@@ -160,9 +194,10 @@ export class Project {
     const { apiKey } = await getSettings()
     let state: CompileState
     if (!apiKey)
-      state = { state: 'error', error: 'Add your VideoDB API key in Settings to render previews.' }
+      state = { state: 'error', error: 'Sign in with VideoDB in Settings to render previews.' }
     else {
-      this.send('project:compile', { state: 'compiling' })
+      this.lastCompile = { state: 'compiling' }
+      this.send('project:compile', this.lastCompile)
       const r = await compileProject(this.dir, apiKey)
       if (r.ok && r.stream_url)
         state = { state: 'ok', stream_url: r.stream_url, player_url: r.player_url }
@@ -170,13 +205,16 @@ export class Project {
       else if (r.error === 'timeline is empty') state = { state: 'idle' }
       else state = { state: 'error', error: r.error ?? 'compile failed' }
     }
-    if (seq === this.compileSeq) this.send('project:compile', state)
+    if (seq === this.compileSeq) {
+      this.lastCompile = state
+      this.send('project:compile', state)
+    }
     return state
   }
 
   async importMedia(sources: Source[]): Promise<void> {
     const { apiKey } = await getSettings()
-    if (!apiKey) throw new Error('Add your VideoDB API key in Settings first.')
+    if (!apiKey) throw new Error('Sign in with VideoDB in Settings first.')
     await Promise.allSettled(sources.map((s) => importMedia(this.dir, apiKey, s)))
   }
 
@@ -187,11 +225,17 @@ export class Project {
   }
 
   async checkpoint(message: string): Promise<boolean> {
-    const { stdout } = await this.git('status', '--porcelain')
-    if (!stdout.trim()) return false
-    await touchMeta(this.dir)
-    await this.git('add', '-A')
-    await this.git('commit', '-q', '-m', message)
+    if (this.noGit) return false
+    try {
+      const { stdout } = await this.git('status', '--porcelain')
+      if (!stdout.trim()) return false
+      await touchMeta(this.dir)
+      await this.git('add', '-A')
+      await this.git('commit', '-q', '-m', message)
+    } catch (e) {
+      console.error('checkpoint failed:', (e as Error).message)
+      return false
+    }
     this.send('project:history', await this.history())
     return true
   }
@@ -220,6 +264,8 @@ export class Project {
 
   // Non-destructive: brings back an old timeline.json as a new checkpoint.
   async restore(hash: string): Promise<void> {
+    if (this.noGit)
+      throw new Error('Version history needs git. Install Git, then reopen the project.')
     const { stdout } = await this.git('show', `${hash}:timeline.json`)
     await fs.writeFile(paths(this.dir).timeline, stdout)
     await this.checkpoint(`Restore ${hash}`)

@@ -1,12 +1,33 @@
+import type { ChatState } from './chat'
 import type { AssetsFile, Issue, SpriteManifest, Timeline } from './timeline'
 
 export type AgentKind = 'claude' | 'codex' | 'pi'
 
 export interface Settings {
   apiKey: string
+  videoDbAuth?: 'sso'
   agent: AgentKind
   recent: string[]
   onboarded: boolean
+  // Last model / thinking level / toggles chosen per agent, re-applied to each new session.
+  agentConfig?: Partial<Record<AgentKind, Record<string, string | boolean>>>
+}
+
+export interface ConfigChoice {
+  value: string
+  name: string
+  description?: string | null
+}
+
+// ACP session config option, with grouped select options flattened.
+export interface ConfigOption {
+  id: string
+  name: string
+  description?: string | null
+  category?: string | null
+  type: 'select' | 'boolean'
+  currentValue: string | boolean
+  options: ConfigChoice[]
 }
 
 export interface AgentInfo {
@@ -15,6 +36,9 @@ export interface AgentInfo {
   installed: boolean
   usable: boolean
   version?: string
+  // From the CLI's status command; undefined when it has none (Pi).
+  signedIn?: boolean
+  login?: string
   note?: string
 }
 
@@ -54,7 +78,7 @@ export interface ProjectState {
 }
 
 export type CompileState =
-  | { state: 'idle' }
+  | { state: 'idle'; clear?: boolean }
   | { state: 'compiling' }
   | { state: 'ok'; stream_url: string; player_url?: string }
   | { state: 'invalid'; issues: Issue[] }
@@ -82,8 +106,13 @@ export type AgentStatus =
       modes: AgentMode[]
       currentMode?: string
       images: boolean
+      config: ConfigOption[]
+      sessionId: string
+      // Agent can list / reload past sessions for this folder (ACP session/list, session/load).
+      canList: boolean
+      canLoad: boolean
     }
-  | { state: 'error'; kind: AgentKind; error: string }
+  | { state: 'error'; kind: AgentKind; error: string; needsLogin?: boolean }
 
 export interface PermissionAsk {
   requestId: string
@@ -91,4 +120,17 @@ export interface PermissionAsk {
   kind?: string | null
   rawInput?: unknown
   options: { optionId: string; name: string; kind: string }[]
+}
+
+export interface SessionInfo {
+  sessionId: string
+  title?: string | null
+  updatedAt?: string | null
+}
+
+// What a (re)attached chat panel needs: live status plus the transcript so far.
+export interface AgentSnapshot {
+  status: AgentStatus
+  chat: ChatState
+  seq: number
 }

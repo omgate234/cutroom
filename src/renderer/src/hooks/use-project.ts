@@ -41,6 +41,7 @@ export function useProject(): ProjectApi {
       if (!r) return
       setProject(r.state)
       setHistory(r.history)
+      if (r.compile) setCompile(r.compile)
     } catch (e) {
       toast.error(errMsg(e))
     }
@@ -52,6 +53,7 @@ export function useProject(): ProjectApi {
       const r = await window.api.projects.create()
       setProject(r.state)
       setHistory(r.history)
+      if (r.compile) setCompile(r.compile)
     } catch (e) {
       toast.error(errMsg(e))
     }

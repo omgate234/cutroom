@@ -2,7 +2,10 @@
 import { readAssets } from '@shared/project'
 import { readJson } from '@shared/project'
 import { requestImport } from '@shared/inbox'
+import { captionPresetList } from '@shared/style-presets'
 import {
+  importLut,
+  inspectRender,
   compileProject,
   exportProject,
   getFrames,
@@ -20,9 +23,12 @@ const USAGE = `vdb <command>
   search "<query>" [--kind speech|visual|both] [--media <id>] [--top <n>]
   frames <media_id> <t1> [t2 ...]   save frames (source seconds) to renders/frames, print paths
   validate                          check timeline.json
-  compile                           render timeline.json, print stream url
+  compile                           render timeline.json, print the HLS stream url (inspect it with ffmpeg)
   cuts [--track <n>]                frames either side of each cut, print paths
-  export                            mp4 download for the current timeline`
+  export                            mp4 download for the current timeline
+  inspect <t1> [t2 ...]              inspect rendered output frames (requires ffmpeg)
+  lut <path.cube>                    upload a colour grade, print LUT JSON
+  presets                           tested caption styles with the exact caption JSON`
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`)
@@ -34,9 +40,21 @@ const print = (v: unknown): void =>
 
 async function main(): Promise<void> {
   const settings = await readJson<{ apiKey?: string }>(process.env.CUTROOM_SETTINGS ?? '', {})
-  const apiKey = process.env.VIDEO_DB_API_KEY || settings.apiKey || ''
+  // Cutroom's own key wins over anything a shell profile exports.
+  const apiKey = process.env.CUTROOM_SETTINGS
+    ? (settings.apiKey ?? '')
+    : (process.env.VIDEO_DB_API_KEY ?? '')
   const [cmd, ...args] = process.argv.slice(2)
   switch (cmd) {
+    case 'inspect':
+      return print(
+        (await inspectRender(dir, apiKey, args.map(Number))).map(({ time, path }) => ({
+          time,
+          path
+        }))
+      )
+    case 'lut':
+      return print(await importLut(apiKey, args[0] ?? ''))
     case 'list':
       return print((await readAssets(dir)).media.map(({ sprite: _s, ...m }) => m))
     case 'import': {
@@ -77,6 +95,8 @@ async function main(): Promise<void> {
     }
     case 'export':
       return print(await exportProject(dir, apiKey))
+    case 'presets':
+      return print(captionPresetList())
     default:
       print(USAGE)
   }

@@ -21,10 +21,10 @@ export async function readJson<T>(file: string, fallback: T): Promise<T> {
 }
 
 // Write-then-rename so watchers and the agent never see a half-written file.
-export async function writeJson(file: string, data: unknown): Promise<void> {
+export async function writeJson(file: string, data: unknown, mode?: number): Promise<void> {
   await fs.mkdir(dirname(file), { recursive: true })
   const tmp = `${file}.${randomBytes(4).toString('hex')}.tmp`
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2) + '\n')
+  await fs.writeFile(tmp, JSON.stringify(data, null, 2) + '\n', { mode })
   await fs.rename(tmp, file)
 }
 
@@ -74,7 +74,7 @@ export async function scaffoldProject(dir: string): Promise<void> {
   await writeIfMissing(
     join(dir, '.claude', 'settings.json'),
     JSON.stringify(
-      { permissions: { allow: ['mcp__videodb', 'Edit(timeline.json)', 'Write(timeline.json)'] } },
+      { permissions: { allow: ['mcp__cutroom', 'Edit(timeline.json)', 'Write(timeline.json)'] } },
       null,
       2
     ) + '\n'

@@ -11,7 +11,7 @@ import {
   Film,
   ImageIcon,
   Paperclip,
-  RotateCw,
+  SquarePen,
   Scissors,
   Smartphone,
   Square,
@@ -19,13 +19,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import {
   InputGroup,
   InputGroupAddon,
@@ -33,27 +27,15 @@ import {
   InputGroupTextarea
 } from '@/components/ui/input-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import type { AgentKind, AgentStatus, Attachment, PermissionAsk, ProjectState } from '@shared/ipc'
+import type { AgentKind, AgentSnapshot, AgentStatus, Attachment, ProjectState } from '@shared/ipc'
+import { EMPTY_CHAT, isStep, reduceChat, type ChatState, type SeqEvent } from '@shared/chat'
+import { SessionHistory } from '@/components/chat/session-history'
 import { AGENT_LABEL, AgentIcon } from '@/components/brand'
-import {
-  ErrorStep,
-  PermissionStep,
-  PlanStep,
-  ThoughtStep,
-  ToolStep,
-  type ToolItem
-} from '@/components/chat/steps'
+import { AgentControls } from '@/components/chat/agent-controls'
+import { SignInCard } from '@/components/sign-in-card'
+import { ErrorStep, PermissionStep, PlanStep, ThoughtStep, ToolStep } from '@/components/chat/steps'
 import { cn } from '@/lib/utils'
 import { errMsg } from '@/lib/format'
-
-type ChatItem =
-  | { type: 'user'; text: string; files?: Attached[] }
-  | { type: 'agent'; text: string }
-  | { type: 'thought'; text: string }
-  | ToolItem
-  | { type: 'plan'; entries: { content: string; status: string }[] }
-  | { type: 'permission'; ask: PermissionAsk; answer?: string }
-  | { type: 'error'; text: string }
 
 const STARTERS = [
   { icon: Film, text: 'Make a 30 second highlight of the best moments, with captions.' },
@@ -124,58 +106,6 @@ function Chip({ f, onRemove }: { f: Attached; onRemove?: () => void }): React.JS
   )
 }
 
-const isStep = (i: ChatItem): boolean => ['tool', 'thought', 'plan', 'permission'].includes(i.type)
-
-function applyUpdate(items: ChatItem[], u: Record<string, any>): ChatItem[] {
-  const next = [...items]
-  const last = next[next.length - 1]
-  switch (u.sessionUpdate) {
-    case 'agent_message_chunk':
-    case 'agent_thought_chunk': {
-      const kind = u.sessionUpdate === 'agent_message_chunk' ? 'agent' : 'thought'
-      const text = u.content?.type === 'text' ? u.content.text : ''
-      if (!text) return items
-      if (last?.type === kind) next[next.length - 1] = { ...last, text: last.text + text }
-      else next.push({ type: kind, text })
-      return next
-    }
-    case 'tool_call':
-      next.push({
-        type: 'tool',
-        id: u.toolCallId,
-        title: u.title ?? 'Tool',
-        kind: u.kind,
-        status: u.status,
-        rawInput: u.rawInput,
-        content: u.content ?? []
-      })
-      return next
-    case 'tool_call_update': {
-      const i = next.findIndex((x) => x.type === 'tool' && x.id === u.toolCallId)
-      if (i < 0) return items
-      const t = next[i] as ToolItem
-      next[i] = {
-        ...t,
-        title: u.title ?? t.title,
-        kind: u.kind ?? t.kind,
-        status: u.status ?? t.status,
-        rawInput: u.rawInput ?? t.rawInput,
-        content: u.content ?? t.content
-      }
-      return next
-    }
-    case 'plan': {
-      const plan: ChatItem = { type: 'plan', entries: u.entries ?? [] }
-      const i = next.findLastIndex((x) => x.type === 'plan')
-      if (i >= 0 && next.slice(i + 1).every(isStep)) next[i] = plan
-      else next.push(plan)
-      return next
-    }
-    default:
-      return items
-  }
-}
-
 export function ChatPanel({
   project,
   draft
@@ -184,39 +114,54 @@ export function ChatPanel({
   draft: { text: string; n: number } | null
 }): React.JSX.Element {
   const [status, setStatus] = useState<AgentStatus>({ state: 'off' })
-  const [items, setItems] = useState<ChatItem[]>([])
-  const [running, setRunning] = useState(false)
+  const [chat, setChat] = useState<ChatState>(EMPTY_CHAT)
+  const { items, running } = chat
   const [input, setInput] = useState('')
   const [kind, setKind] = useState<AgentKind>('claude')
   const bottomRef = useRef<HTMLDivElement>(null)
   const textRef = useRef<HTMLTextAreaElement>(null)
 
+  // The transcript lives in the main process. Live events that race the snapshot are buffered and
+  // replayed past its seq, so nothing is lost or applied twice.
+  const sync = useRef<{ seq: number; ready: boolean; buffer: SeqEvent[] }>({
+    seq: 0,
+    ready: false,
+    buffer: []
+  })
   useEffect(() => {
+    sync.current = { seq: 0, ready: false, buffer: [] }
     const offs = [
-      window.api.on('agent:status', setStatus),
-      window.api.on('agent:update', (u) => setItems((it) => applyUpdate(it, u))),
-      window.api.on('agent:permission', (ask: PermissionAsk) =>
-        setItems((it) => [...it, { type: 'permission', ask }])
-      ),
-      window.api.on('agent:stop', (r: { stopReason: string; error?: string }) => {
-        setRunning(false)
-        if (r.error) setItems((it) => [...it, { type: 'error', text: r.error! }])
+      window.api.on('agent:status', (s: AgentStatus) => {
+        setStatus(s)
+        if (s.state !== 'off') setKind(s.kind)
+      }),
+      window.api.on('agent:event', (e: SeqEvent) => {
+        const st = sync.current
+        if (!st.ready) return void st.buffer.push(e)
+        if (e.seq <= st.seq) return
+        st.seq = e.seq
+        setChat((c) => reduceChat(c, e))
       })
     ]
+    void window.api.agent
+      .attach()
+      .then((snap: AgentSnapshot) => {
+        const st = sync.current
+        let c = snap.chat
+        st.seq = snap.seq
+        for (const e of st.buffer.sort((x, y) => x.seq - y.seq))
+          if (e.seq > st.seq) {
+            c = reduceChat(c, e)
+            st.seq = e.seq
+          }
+        st.buffer = []
+        st.ready = true
+        setChat(c)
+        setStatus(snap.status)
+        if (snap.status.state !== 'off') setKind(snap.status.kind)
+      })
+      .catch((e: unknown) => toast.error(errMsg(e)))
     return () => offs.forEach((off) => off())
-  }, [])
-
-  // New project → fresh session with the last-used agent (guarded against StrictMode double-run).
-  const startedFor = useRef<string | null>(null)
-  useEffect(() => {
-    if (startedFor.current === project.dir) return
-    startedFor.current = project.dir
-    setItems([])
-    setRunning(false)
-    void window.api.settings.get().then((s) => {
-      setKind(s.agent)
-      void window.api.agent.start(s.agent).catch((e) => toast.error(errMsg(e)))
-    })
   }, [project.dir])
 
   useEffect(() => {
@@ -231,11 +176,20 @@ export function ChatPanel({
 
   const start = (k: AgentKind): void => {
     setKind(k)
-    setItems([])
-    setRunning(false)
-    void window.api.settings.set({ agent: k })
     void window.api.agent.start(k).catch((e) => toast.error(errMsg(e)))
   }
+
+  // After signing in elsewhere, coming back to the window restarts the agent once it is signed in.
+  const loginKind = status.state === 'error' && status.needsLogin ? status.kind : null
+  useEffect(() => {
+    if (!loginKind) return
+    const recheck = (): void =>
+      void window.api.signedIn(loginKind).then((ok: boolean | undefined) => {
+        if (ok) start(loginKind)
+      })
+    window.addEventListener('focus', recheck)
+    return () => window.removeEventListener('focus', recheck)
+  }, [loginKind])
 
   const [files, setFiles] = useState<Attached[]>([])
   const [dropping, setDropping] = useState(false)
@@ -267,29 +221,18 @@ export function ChatPanel({
   const send = (text: string): void => {
     const t = text.trim() || (files.length ? 'See the attached files.' : '')
     if (!t || running || status.state !== 'ready') return
-    setItems((it) => [...it, { type: 'user', text: t, files }])
     setInput('')
     setFiles([])
-    setRunning(true)
-    void window.api.agent.prompt(
-      t,
-      files.map((f) => f.a)
-    )
+    void window.api.agent
+      .prompt(
+        t,
+        files.map((f) => f.a)
+      )
+      .catch((e: unknown) => toast.error(errMsg(e)))
   }
 
-  const answer = (requestId: string, optionId: string | null): void => {
+  const answer = (requestId: string, optionId: string | null): void =>
     void window.api.agent.reply(requestId, optionId)
-    setItems((it) =>
-      it.map((x) =>
-        x.type === 'permission' && x.ask.requestId === requestId
-          ? {
-              ...x,
-              answer: optionId ? x.ask.options.find((o) => o.optionId === optionId)?.name : 'Denied'
-            }
-          : x
-      )
-    )
-  }
 
   const ready = status.state === 'ready'
 
@@ -321,15 +264,19 @@ export function ChatPanel({
                 : ''}
         </span>
         <div className="flex-1" />
+        <SessionHistory status={status} disabled={running} />
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
               size="icon-xs"
               aria-label="New session"
-              onClick={() => start(kind)}
+              disabled={running || !ready}
+              onClick={() =>
+                void window.api.agent.newSession().catch((e: unknown) => toast.error(errMsg(e)))
+              }
             >
-              <RotateCw />
+              <SquarePen />
             </Button>
           </TooltipTrigger>
           <TooltipContent>New session</TooltipContent>
@@ -339,7 +286,21 @@ export function ChatPanel({
       <ScrollArea className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
         <div className="flex flex-col gap-2.5 p-3">
           <AnimatePresence>
-            {status.state === 'error' && (
+            {status.state === 'error' && status.needsLogin && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <SignInCard
+                  name={AGENT_LABEL[status.kind]}
+                  kind={status.kind}
+                  onRetry={() => start(status.kind)}
+                />
+              </motion.div>
+            )}
+            {status.state === 'error' && !status.needsLogin && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
@@ -395,8 +356,8 @@ export function ChatPanel({
                   >
                     {it.files?.length ? (
                       <span className="mb-1.5 flex flex-wrap gap-1">
-                        {it.files.map((f) => (
-                          <Chip key={f.a.path} f={f} />
+                        {it.files.map((a) => (
+                          <Chip key={a.path} f={{ a }} />
                         ))}
                       </span>
                     ) : null}
@@ -486,7 +447,8 @@ export function ChatPanel({
             </motion.div>
           )}
         </AnimatePresence>
-        <InputGroup className="has-[textarea:focus]:ring-ring/30 transition-shadow">
+        {/* The group dims for ANY disabled child; only a disabled textarea should dim the composer. */}
+        <InputGroup className="has-[textarea:focus]:ring-ring/30 transition-shadow has-disabled:bg-transparent has-disabled:opacity-100 dark:has-disabled:bg-input/30 has-[textarea:disabled]:opacity-50">
           {files.length > 0 && (
             <InputGroupAddon align="block-start" className="flex-wrap gap-1">
               <AnimatePresence initial={false}>
@@ -542,11 +504,12 @@ export function ChatPanel({
             <Select value={kind} onValueChange={(v) => start(v as AgentKind)}>
               <SelectTrigger
                 size="sm"
-                className="h-6 gap-1.5 border-0 px-1.5 text-xs shadow-none dark:bg-transparent"
+                className="h-6 gap-1 border-0 px-1.5 text-xs shadow-none dark:bg-transparent"
+                aria-label="Agent"
               >
-                <SelectValue />
+                <AgentIcon kind={kind} className="size-3.5" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent position="popper" side="top" align="start">
                 {(['claude', 'codex', 'pi'] as AgentKind[]).map((k) => (
                   <SelectItem key={k} value={k}>
                     <AgentIcon kind={k} />
@@ -555,26 +518,7 @@ export function ChatPanel({
                 ))}
               </SelectContent>
             </Select>
-            {status.state === 'ready' && status.modes.length > 0 && (
-              <Select
-                value={status.currentMode}
-                onValueChange={(v) => void window.api.agent.setMode(v)}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="h-6 border-0 px-1.5 text-xs shadow-none dark:bg-transparent"
-                >
-                  <SelectValue placeholder="Mode" />
-                </SelectTrigger>
-                <SelectContent>
-                  {status.modes.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
+            <AgentControls status={status} />
             <div className="flex-1" />
             <AnimatePresence mode="wait" initial={false}>
               <motion.span

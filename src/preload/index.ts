@@ -7,13 +7,17 @@ const invoke =
 
 const api = {
   settings: {
+    login: invoke('settings:login'),
+    cancelLogin: invoke('settings:cancel-login'),
     get: invoke('settings:get'),
-    set: invoke('settings:set'),
-    validateKey: invoke('settings:validate-key')
+    set: invoke('settings:set')
   },
   detectAgents: invoke('agents:detect'),
+  signedIn: invoke('agents:signed-in'),
+  openLogin: invoke('agents:login'),
   setTheme: invoke('theme:set'),
   project: {
+    importLut: invoke('project:import-lut'),
     pick: invoke('project:pick'),
     open: invoke('project:open'),
     close: invoke('project:close'),
@@ -42,13 +46,19 @@ const api = {
   },
   skills: { status: invoke('skills:status'), install: invoke('skills:install') },
   agent: {
+    attach: invoke('agent:attach'),
     start: invoke('agent:start'),
-    status: invoke('agent:status'),
+    newSession: invoke('agent:new-session'),
+    listSessions: invoke('agent:list-sessions'),
+    loadSession: invoke('agent:load-session'),
+    busy: invoke('agents:busy'),
     prompt: invoke('agent:prompt'),
     cancel: invoke('agent:cancel'),
     setMode: invoke('agent:set-mode'),
+    setConfig: invoke('agent:set-config'),
     reply: invoke('agent:permission-reply')
   },
+  platform: process.platform,
   openExternal: invoke('shell:open'),
   reveal: invoke('shell:reveal'),
   pathForFile: (f: File): string => webUtils.getPathForFile(f),

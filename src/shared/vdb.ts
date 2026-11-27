@@ -1,3 +1,6 @@
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+import { validateCube, type Lut } from './effects'
 import { promises as fs } from 'fs'
 import { join, basename } from 'path'
 import { createHash, randomBytes } from 'crypto'
@@ -21,7 +24,7 @@ const API = 'https://api.videodb.io'
 let cached: { key: string; conn: Connection; coll: Promise<Collection> } | null = null
 
 function vdb(apiKey: string): { conn: Connection; coll: Promise<Collection> } {
-  if (!apiKey) throw new Error('VideoDB API key is not set. Add it in Cutroom settings.')
+  if (!apiKey) throw new Error('VideoDB is not connected. Open Settings and sign in with VideoDB.')
   if (cached?.key !== apiKey) {
     const conn = connect({ apiKey })
     cached = { key: apiKey, conn, coll: conn.getCollection() }
@@ -70,7 +73,11 @@ export async function importMedia(dir: string, apiKey: string, src: Source): Pro
     const coll = await vdb(apiKey).coll
     const obj =
       'videoId' in src
-        ? await coll.getVideo(src.videoId)
+        ? await coll.getVideo(src.videoId).catch(() => {
+            throw new Error(
+              `${src.videoId} is not in the VideoDB account Cutroom uses. It was probably made with another VideoDB login or MCP server; import it by public URL or file instead.`
+            )
+          })
         : 'filePath' in src
           ? await coll.uploadFile({ filePath: src.filePath })
           : await coll.uploadURL({ url: src.url })
@@ -278,7 +285,11 @@ export async function compileProject(dir: string, apiKey: string): Promise<Compi
   if (!timeline.tracks.some((t) => t.clips.length))
     return { ok: false, issues: [], error: 'timeline is empty' }
   const body = toWire(timeline)
-  const hash = createHash('sha1').update(JSON.stringify(body)).digest('hex')
+  const hash = createHash('sha1')
+    .update(apiKey)
+    .update('\0')
+    .update(JSON.stringify(body))
+    .digest('hex')
   const cache = await readJson<Record<string, { stream_url: string; player_url?: string }>>(
     paths(dir).cache,
     {}
@@ -295,7 +306,17 @@ export async function compileProject(dir: string, apiKey: string): Promise<Compi
     await writeJson(paths(dir).cache, cache)
     return { ok: true, issues: [], stream_url, player_url: res.data?.playerUrl, hash }
   } catch (e) {
-    const err = e as { response?: { data?: { message?: string } }; message?: string }
+    const err = e as {
+      response?: { status?: number; data?: { message?: string } }
+      message?: string
+    }
+    if (err.response?.status === 401 || err.response?.status === 403)
+      return {
+        ok: false,
+        issues: [],
+        error:
+          'Your VideoDB connection expired or was revoked. Open Settings and sign in with VideoDB again.'
+      }
     return { ok: false, issues: [], error: err.response?.data?.message ?? err.message ?? String(e) }
   }
 }
@@ -375,4 +396,87 @@ export async function inspectCuts(
     })
   }
   return out
+}
+
+// Same presigned-upload contract as videodb-python/_upload.py; no media asset is created.
+export async function importLut(apiKey: string, filePath: string): Promise<Lut> {
+  if (!filePath.toLowerCase().endsWith('.cube')) throw new Error('Choose a .cube LUT file')
+  const stat = await fs.stat(filePath)
+  if (stat.size > 20 * 1024 * 1024) throw new Error('LUT must be smaller than 20 MB')
+  const bytes = await fs.readFile(filePath)
+  validateCube(bytes.toString('utf8'))
+  const { conn, coll } = vdb(apiKey)
+  const collection = await coll
+  const result = await conn.vhttp.get<{ upload_url: string }>(
+    ['collection', collection.id, 'upload_url'],
+    { params: { name: basename(filePath) } }
+  )
+  const url = result.data?.uploadUrl
+  if (!url || !url.startsWith('https://')) throw new Error('VideoDB returned no secure upload URL')
+  const form = new FormData()
+  form.append('file', new Blob([new Uint8Array(bytes)], { type: 'text/plain' }), basename(filePath))
+  const response = await fetch(url, {
+    method: 'POST',
+    body: form,
+    signal: AbortSignal.timeout(60000)
+  })
+  if (!response.ok) throw new Error(`LUT upload failed (${response.status})`)
+  return { src: url, intensity: 1 }
+}
+
+// Output-time samples include the composited captions, grades and overlays.
+export async function inspectRender(
+  dir: string,
+  apiKey: string,
+  times: number[]
+): Promise<{ time: number; path: string; data: string }[]> {
+  if (!times.length || times.length > 12 || times.some((t) => !Number.isFinite(t) || t < 0))
+    throw new Error('Give 1–12 finite output times >= 0')
+  const timeline = await readTimeline(dir)
+  const duration = Math.max(
+    ...timeline.tracks.flatMap((t) => t.clips.map((c) => c.start + c.clip.duration)),
+    0
+  )
+  if (times.some((t) => t >= duration))
+    throw new Error('Inspection times must be before the end of the timeline')
+  const result = await compileProject(dir, apiKey)
+  if (!result.ok || !result.stream_url)
+    throw new Error(result.error ?? JSON.stringify(result.issues))
+  await fs.mkdir(paths(dir).frames, { recursive: true })
+  const frames: { time: number; path: string; data: string }[] = []
+  for (const time of times) {
+    const path = join(paths(dir).frames, `render_${result.hash}_${time.toFixed(3)}.jpg`)
+    try {
+      await promisify(execFile)(
+        'ffmpeg',
+        [
+          '-nostdin',
+          '-v',
+          'error',
+          '-y',
+          '-ss',
+          String(time),
+          '-i',
+          result.stream_url,
+          '-frames:v',
+          '1',
+          '-vf',
+          'scale=960:-2',
+          path
+        ],
+        { timeout: 60000, maxBuffer: 1024 * 1024 }
+      )
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT')
+        throw new Error(
+          'Rendered inspection needs ffmpeg installed on PATH. Preview in Cutroom and report that automated visual verification is unavailable.',
+          { cause: e }
+        )
+      throw new Error('Could not inspect the rendered stream. Check playback and try again.', {
+        cause: e
+      })
+    }
+    frames.push({ time, path, data: (await fs.readFile(path)).toString('base64') })
+  }
+  return frames
 }

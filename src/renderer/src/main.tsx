@@ -7,6 +7,9 @@ import { Toaster } from '@/components/ui/sonner'
 import { ThemeSync } from '@/components/theme-toggle'
 import App from './App'
 
+// Drives the mac:/win: style variants (title bar insets) and shortcut labels.
+document.documentElement.dataset.platform = window.api.platform
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>

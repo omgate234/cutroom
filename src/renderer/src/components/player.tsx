@@ -12,6 +12,8 @@ import type { CompileState } from '@shared/ipc'
 import type { Timeline } from '@shared/timeline'
 import { timelineDuration } from '@shared/timeline'
 import { tc } from '@/lib/format'
+import { frameStyle } from '@/lib/sprite'
+import type { Scrub } from '@/components/timeline-view'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -19,9 +21,10 @@ interface Props {
   compile: CompileState
   timeline: Timeline
   onTime: (t: number) => void
+  scrub?: Scrub | null
 }
 
-export function Player({ ref, compile, timeline, onTime }: Props): React.JSX.Element {
+export function Player({ ref, compile, timeline, onTime, scrub }: Props): React.JSX.Element {
   const [stream, setStream] = useState<string | null>(null)
   const [playing, setPlaying] = useState(false)
   const [time, setTime] = useState(0)
@@ -32,7 +35,8 @@ export function Player({ ref, compile, timeline, onTime }: Props): React.JSX.Ele
   // Keep showing the last good render while a new one compiles or fails.
   useEffect(() => {
     if (compile.state === 'ok') setStream(compile.stream_url)
-    if (compile.state === 'idle' && !timeline.tracks.some((t) => t.clips.length)) setStream(null)
+    if (compile.state === 'idle' && (compile.clear || !timeline.tracks.some((t) => t.clips.length)))
+      setStream(null)
   }, [compile, timeline])
 
   useEffect(() => {
@@ -98,6 +102,7 @@ export function Player({ ref, compile, timeline, onTime }: Props): React.JSX.Ele
             setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)
           }
         />
+        {scrub && <ScrubFrame scrub={scrub} />}
         {!stream &&
           compile.state !== 'compiling' &&
           compile.state !== 'invalid' &&
@@ -203,6 +208,37 @@ export function Player({ ref, compile, timeline, onTime }: Props): React.JSX.Ele
           }}
         />
       </div>
+    </div>
+  )
+}
+
+// Hovering the timeline ruler shows that moment's source frame over the player.
+function ScrubFrame({ scrub }: { scrub: Scrub }): React.JSX.Element {
+  const box = useRef<HTMLDivElement>(null)
+  const [size, setSize] = useState({ w: 0, h: 0 })
+  useEffect(() => {
+    const el = box.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const s = scrub.sprite
+  const f = scrub.frame
+  let style: React.CSSProperties | null = null
+  if (s && f && size.h) {
+    const fit = Math.min(size.h, (size.w * s.thumbnail.height) / s.thumbnail.width)
+    style = frameStyle(s, f, Math.floor(fit))
+  }
+  return (
+    <div
+      ref={box}
+      className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/80"
+    >
+      {style ? <div style={style} /> : <span className="text-xs text-white/60">No frame here</span>}
+      <span className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded bg-black/70 px-1.5 py-0.5 font-mono text-[11px] text-white tabular-nums">
+        {tc(scrub.time)}
+      </span>
     </div>
   )
 }

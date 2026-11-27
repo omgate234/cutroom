@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { AnimatePresence, motion } from 'motion/react'
 import type { Settings } from '@shared/ipc'
 import { useProject } from '@/hooks/use-project'
@@ -13,6 +14,19 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     void window.api.settings.get().then(setSettings)
   }, [])
+
+  const { open } = p
+  useEffect(
+    () =>
+      window.api.on(
+        'agent:background-done',
+        (r: { dir: string; name: string; stopReason: string }) =>
+          toast(`${r.name}: the agent ${r.stopReason === 'end_turn' ? 'finished' : 'stopped'}`, {
+            action: { label: 'Open', onClick: () => void open(r.dir) }
+          })
+      ),
+    [open]
+  )
 
   const screen = !settings
     ? 'loading'

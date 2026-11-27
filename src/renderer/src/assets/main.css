@@ -3,6 +3,8 @@
 @import "shadcn/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant mac (&:where([data-platform=darwin] *));
+@custom-variant win (&:where([data-platform=win32] *));
 
 @theme inline {
     --color-clip-video: var(--clip-video);

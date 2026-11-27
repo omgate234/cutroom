@@ -11,9 +11,15 @@ files:
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
   - '!docs/*'
+  - '!tests/**'
+  - '!scripts/**'
   # Cutroom drives the user's installed claude / codex, so the adapters' bundled platform binaries stay out.
   - '!node_modules/@anthropic-ai/claude-agent-sdk-*/**'
   - '!node_modules/@openai/codex-*/**'
+  # The VideoDB SDK's macOS screen-capture helper; Cutroom doesn't use capture.
+  - '!node_modules/videodb/bin/**'
+  - '!marketing/**'
+  - '!website/**'
 # Agent adapters ship native binaries they spawn by path; those can't execute from inside an asar archive.
 asar: false
 mac:
@@ -31,5 +37,20 @@ mac:
 dmg:
   artifactName: Cutroom-${version}-${arch}.${ext}
   title: Cutroom ${version}
+  # No auto-updater, so no .blockmap files.
+  writeUpdateInfo: false
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # Not code-signed yet: SmartScreen shows "unrecognized app" until it is.
+nsis:
+  artifactName: Cutroom-${version}-${arch}-setup.${ext}
+  # Per-user install: no admin prompt, lands in %LOCALAPPDATA%\Programs\Cutroom.
+  oneClick: true
+  perMachine: false
+  deleteAppDataOnUninstall: false
+  shortcutName: Cutroom
+  differentialPackage: false
 npmRebuild: false
 publish: null

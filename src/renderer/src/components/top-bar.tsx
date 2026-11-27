@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Download, FolderOpen, History, House, Settings2, Undo2 } from 'lucide-react'
+import { Download, FolderOpen, History, House, Redo2, Settings2, Undo2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -16,9 +16,10 @@ import { Separator } from '@/components/ui/separator'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { ThemeToggle } from '@/components/theme-toggle'
 import type { ProjectApi } from '@/hooks/use-project'
+import type { Editor } from '@/hooks/use-editor'
 import type { ProjectState } from '@shared/ipc'
 import { timelineDuration } from '@shared/timeline'
-import { errMsg, tc } from '@/lib/format'
+import { errMsg, kbd, tc } from '@/lib/format'
 
 function IconButton({
   label,
@@ -97,10 +98,12 @@ function InlineName({
 
 export function TopBar({
   api,
-  project
+  project,
+  editor
 }: {
   api: ProjectApi
   project: ProjectState
+  editor: Editor
 }): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -123,7 +126,7 @@ export function TopBar({
   }
 
   return (
-    <header className="drag flex h-11 shrink-0 items-center gap-2 border-b pr-2 pl-20">
+    <header className="drag flex h-11 shrink-0 items-center gap-2 border-b pr-2 pl-3 mac:pl-20 win:pr-36">
       <div className="no-drag flex min-w-0 items-center gap-1.5">
         <IconButton label="All projects" onClick={api.close}>
           <House />
@@ -136,11 +139,11 @@ export function TopBar({
       </div>
       <div className="flex-1" />
       <div className="no-drag flex items-center gap-0.5">
-        <IconButton
-          label="Undo last change"
-          onClick={() => void window.api.project.undo().catch((e) => toast.error(errMsg(e)))}
-        >
+        <IconButton label={`Undo (${kbd('⌘Z')})`} disabled={!editor.canUndo} onClick={editor.undo}>
           <Undo2 />
+        </IconButton>
+        <IconButton label={`Redo (${kbd('⇧⌘Z')})`} disabled={!editor.canRedo} onClick={editor.redo}>
+          <Redo2 />
         </IconButton>
         <DropdownMenu>
           <Tooltip>
